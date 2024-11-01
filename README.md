@@ -1,0 +1,1 @@
+Interpret these models with the understanding that draft round is being used to group and cluster NFL picks. Without draft round, combine data is scattered and not a good predictor alone, but with a potential round such as a mock draft, these models are effective.
