@@ -1,0 +1,680 @@
+---
+title: "Final Project Machine Learning"
+author: "Josh Garzaniti"
+date: "2024-10-05"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+##Load In Libraries
+
+```{r cars}
+library(httr)
+library(jsonlite)  
+library(lubridate)  
+library(tidyverse)
+library(randomForest)
+library(pROC)
+library(dplyr)
+library(mice)
+library(xgboost)
+library(caret)
+```
+
+## Reading in Data (Run This only the first time and then once data is in you're set)
+```{r}
+##Loading in the cfbfastR package##
+#if (!requireNamespace('pacman', quietly = TRUE)){
+  #install.packages('pacman')
+#}
+#pacman::p_load_current_gh("sportsdataverse/cfbfastR", dependencies = TRUE, update = TRUE)
+```
+
+
+```{r pressure, echo=FALSE}
+##Saving API Key
+#Sys.setenv(CFBD_API_KEY = "QZxewFX2fwLCvWYMk2tqPpjBttUV8MynJ5s9iG1R5qN7qt68NaRVOonoNWMTzUPv")
+
+#teams_info_df = cfbd_team_info()
+#team_abb = teams_info_df$abbreviation
+#years = 2010:2023
+
+#cfbd = c()
+ 
+#for(yr in years){
+ # for(tm_abb in team_abb){
+    # wating time randomly chosen between 1 and 3 secs
+#    Sys.sleep(sample(1:3, 1))
+    
+    # Request data
+#    df= cfbd_stats_season_player(year = yr, team = tm_abb)
+    
+    # update/append the response data to cfbd
+#    cfbd = bind_rows(cfbd, df)
+    
+    # display info on screen to show progress
+#    message(paste0("Year ", yr, " and team ", tm_abb, " completed\n"))
+#  }
+#}
+
+#write.csv(cfbd,"c:/Machine Learning/cfbd.csv", row.names = FALSE)
+```
+
+## Reading in NFL Combine Dataset
+```{r}
+cfbd = read.csv("c:/Machine Learning/cfbd.csv")
+combine = read.csv("c:/Machine Learning/nfl_combine_2010_to_2023.csv")
+
+View(combine)
+
+str(combine)
+
+colSums(is.na(combine))
+
+drafted_combine = combine%>%
+  filter(Drafted == "True")
+
+View(drafted_combine)
+
+str(drafted_combine)
+
+colSums(is.na(drafted_combine))
+
+```
+
+## Impute Values for all of the Combine Result NA's
+```{r}
+imputed_data = mice(drafted_combine, m = 5, method = 'pmm', maxit = 50, seed = 303)
+
+clean_combine_data = complete(imputed_data, 1)
+
+colSums(is.na(clean_combine_data))
+```
+
+##Convert Combine Data to Right Types
+```{r}
+## Dealing with the height and converting it to inches
+conversion = function(height) {
+  parts = strsplit(height, "-")[[1]]
+  feet = as.numeric(parts[1])
+  inches = as.numeric(parts[2])
+  total_inches = (feet * 12) + inches
+  return(total_inches)
+}
+
+clean_combine_data$Height = sapply(clean_combine_data$Height, conversion)
+
+clean_combine_data
+```
+
+## Deal with the NA's in the CFB Stats table
+```{r}
+#REplacing the NA's with 0's to make the data numerical
+cfbd[is.na(cfbd)] = 0
+
+cfbd
+```
+## Joining both datasets on Player column
+```{r}
+cfbd = cfbd%>%
+  rename("Player"= player)
+
+stats_combine = merge(clean_combine_data, cfbd, by = "Player")
+
+stats_combine = stats_combine%>%
+  group_by(Player)%>%
+  distinct(Player, .keep_all = TRUE) 
+```
+
+## Making Clean Combine the right Data Types
+```{r}
+clean_combine_data$Pos = as.factor(clean_combine_data$Pos)
+clean_combine_data$Height = as.numeric(clean_combine_data$Height)
+clean_combine_data$Weight = as.numeric(clean_combine_data$Weight)
+clean_combine_data$X40yd = as.numeric(clean_combine_data$X40yd)
+clean_combine_data$Vertical = as.numeric(clean_combine_data$Vertical)
+clean_combine_data$Bench = as.numeric(clean_combine_data$Bench)
+clean_combine_data$Broad.Jump = as.numeric(clean_combine_data$Broad.Jump)
+clean_combine_data$X3Cone = as.numeric(clean_combine_data$X3Cone)
+clean_combine_data$Shuttle = as.numeric(clean_combine_data$Shuttle)
+clean_combine_data$Drafted = as.factor(clean_combine_data$Drafted)
+clean_combine_data$Round = as.ordered(clean_combine_data$Round)
+
+str(clean_combine_data)
+```
+
+## Making CFBD vars the right data types
+```{r}
+cfbd$conference = as.factor(cfbd$conference)
+cfbd$passing_completions = as.numeric(cfbd$passing_completions)
+cfbd$passing_att = as.numeric(cfbd$passing_att)
+cfbd$passing_pct = as.numeric(cfbd$passing_pct)
+cfbd$passing_yds = as.numeric(cfbd$passing_yds)
+cfbd$passing_td = as.numeric(cfbd$passing_td)
+cfbd$passing_int = as.numeric(cfbd$passing_int)
+cfbd$passing_ypa = as.numeric(cfbd$passing_ypa)
+cfbd$rushing_car = as.numeric(cfbd$rushing_car)
+cfbd$rushing_yds = as.numeric(cfbd$rushing_yds)
+cfbd$rushing_td = as.numeric(cfbd$rushing_td)
+cfbd$rushing_long = as.numeric(cfbd$rushing_long)
+cfbd$receiving_rec = as.numeric(cfbd$receiving_rec)
+cfbd$receiving_yds = as.numeric(cfbd$receiving_yds)
+cfbd$receiving_td = as.numeric(cfbd$receiving_td)
+cfbd$receiving_ypr = as.numeric(cfbd$receiving_ypr)
+cfbd$receiving_long = as.numeric(cfbd$receiving_long)
+cfbd$fumbles_fum = as.numeric(cfbd$fumbles_fum)
+cfbd$fumbles_rec = as.numeric(cfbd$fumbles_rec)
+cfbd$fumbles_lost = as.numeric(cfbd$fumbles_lost)
+cfbd$defensive_solo = as.numeric(cfbd$defensive_solo)
+cfbd$defensive_tot = as.numeric(cfbd$defensive_tot)
+cfbd$defensive_tfl = as.numeric(cfbd$defensive_tfl)
+cfbd$defensive_sacks = as.numeric(cfbd$defensive_sacks)
+cfbd$defensive_qb_hur = as.numeric(cfbd$defensive_qb_hur)
+cfbd$interceptions_int = as.numeric(cfbd$interceptions_int)
+cfbd$interceptions_yds = as.numeric(cfbd$interceptions_yds)
+cfbd$interceptions_avg = as.numeric(cfbd$interceptions_avg)
+cfbd$interceptions_td = as.numeric(cfbd$interceptions_td)
+cfbd$defensive_pd = as.numeric(cfbd$defensive_pd)
+cfbd$defensive_td = as.numeric(cfbd$defensive_td)
+cfbd$kicking_fgm = as.numeric(cfbd$kicking_fgm)
+cfbd$kicking_fga = as.numeric(cfbd$kicking_fga)
+cfbd$kicking_pct = as.numeric(cfbd$kicking_pct)
+cfbd$kicking_xpa = as.numeric(cfbd$kicking_xpa)
+cfbd$kicking_xpm = as.numeric(cfbd$kicking_xpm)
+cfbd$kicking_pts = as.numeric(cfbd$kicking_pts)
+cfbd$kicking_long = as.numeric(cfbd$kicking_long)
+cfbd$kick_returns_no = as.numeric(cfbd$kick_returns_no)
+cfbd$kick_returns_yds = as.numeric(cfbd$kick_returns_yds)
+cfbd$kick_returns_avg = as.numeric(cfbd$kick_returns_avg)
+cfbd$kick_returns_td = as.numeric(cfbd$kick_returns_td)
+cfbd$kick_returns_long = as.numeric(cfbd$kick_returns_long)
+cfbd$punting_no = as.numeric(cfbd$punting_no)
+cfbd$punting_yds = as.numeric(cfbd$punting_yds)
+cfbd$punting_ypp = as.numeric(cfbd$punting_ypp)
+cfbd$punting_long = as.numeric(cfbd$punting_long)
+cfbd$punting_in_20 = as.numeric(cfbd$punting_in_20)
+cfbd$punting_tb = as.numeric(cfbd$punting_tb)
+cfbd$punt_returns_no = as.numeric(cfbd$punt_returns_no)
+cfbd$punt_returns_yds = as.numeric(cfbd$punt_returns_yds)
+cfbd$punt_returns_avg = as.numeric(cfbd$punt_returns_avg)
+cfbd$punt_returns_td = as.numeric(cfbd$punt_returns_td)
+cfbd$punt_returns_long = as.numeric(cfbd$punt_returns_long)
+
+str(cfbd)
+
+
+
+```
+## Running an XGBoost Model on just the combine data
+```{r}
+#For XGBoost without Round 
+clean_combine_boost_data = clean_combine_data%>%
+  select(-Player, -School,-Year)
+
+str(clean_combine_boost_data)
+
+clean_combine_boost_data[, 1:12] = lapply(clean_combine_boost_data[, 1:12], as.numeric)
+
+#Data Partitioning
+combine_train_indices = createDataPartition(clean_combine_boost_data$Pick, p = 0.60, list = FALSE)
+
+combine_train_data = clean_combine_boost_data[combine_train_indices, ]
+
+combine_test_data = clean_combine_boost_data[-combine_train_indices, ]
+
+#set up train and test matrices 
+
+combine_dtrain = xgb.DMatrix(data = as.matrix(combine_train_data[, 1:11]), label = combine_train_data$Pick)
+
+# Create test matrix
+combine_dtest = xgb.DMatrix(data = as.matrix(combine_test_data[, 1:11]), label = combine_test_data$Pick)
+
+set.seed(303)
+combine_bst_1 = xgboost(data = combine_dtrain, # Set training data
+               
+               nrounds = 100, # Set number of rounds
+               
+               verbose = 1, # 1 - Prints out fit
+               print_every_n = 20, # Prints out result every 20th iteration
+               
+               objective = "reg:squarederror", # Set objective
+               eval_metric = "rmse")
+
+# Predict on test data
+combine_pred = predict(combine_bst_1, combine_dtest)
+
+#Evaluate Prediction Model
+summary(combine_pred)
+
+residuals = combine_test_data$Pick - combine_pred
+
+combine_residuals = ggplot() +
+  geom_point(aes(x = combine_pred, y = residuals)) +
+  geom_hline(yintercept = 0, linetype = "dashed", color = "red") +
+  labs(x = "Predicted Values", y = "Residuals", title = "Residuals Plot")+
+  theme_minimal()
+
+combine_residuals
+
+combine_predicted_actual = ggplot() +
+  geom_point(aes(x = combine_test_data$Pick, y = combine_pred), color = "blue") +
+  geom_abline(slope = 1, intercept = 0, linetype = "dashed", color = "red") +
+  labs(x = "Actual Values", y = "Predicted Values", title = "Predicted vs Actual")+
+  theme_minimal()
+
+combine_predicted_actual
+```
+##Plotting Important Features
+```{r}
+combine_importance_matrix = xgb.importance(feature_names = colnames(as.matrix(combine_train_data[, 1:11])), model = combine_bst_1)
+
+
+xgb.plot.importance(combine_importance_matrix)
+```
+## Tuning Combine XGB Model for number of Trees
+```{r}
+set.seed(303)
+combine_bst_2 = xgb.cv(data = combine_dtrain,
+               nfold = 5, 
+               eta = 0.1, 
+               nrounds = 1000, 
+               early_stopping_rounds = 50, 
+               verbose = 1, 
+               nthread = 1, 
+               print_every_n = 20, 
+               objective = "reg:squarederror", # Set objective
+               eval_metric = "rmse")
+
+##31 is the optimal number of rounds/trees
+```
+## Tuning Parameters
+```{r}
+max_depth_vals_combine = c(3, 5, 7, 10, 15) #Depth vector
+min_child_weight_combine = c(1,3,5,7, 10, 15) # Child vector
+
+
+cv_params_combine = expand.grid(max_depth_vals_combine, min_child_weight_combine)
+
+names(cv_params_combine) = c("max_depth", "min_child_weight")
+#Results vector
+rmse_vec_combine = rep(NA, nrow(cv_params_combine)) 
+#For Loop going through each depth and child vector and printing results
+for(i in 1:nrow(cv_params_combine)){
+  set.seed(111111)
+  bst_tune_combine = xgb.cv(data = combine_dtrain, 
+              nfold = 5, # 5 fold CV
+              eta = 0.1, # Learning Rate
+              max.depth = cv_params_combine$max_depth[i], #Max depth
+              min_child_weight = cv_params_combine$min_child_weight[i], #Child number
+              nrounds = 51, #Optimal rounds should be 51
+              early_stopping_rounds = 20, 
+              verbose = 1, 
+              nthread = 1, 
+              print_every_n = 20, 
+              objective = "reg:squarederror", #Good for Regression
+              eval_metric = "rmse") #Using RMSE
+  rmse_vec_combine[i] = bst_tune_combine$evaluation_log$test_rmse_mean[bst_tune_combine$best_iteration]
+}
+
+cv_results = cbind(cv_params_combine, rmse_vec_combine)
+
+cv_results
+
+#Best RMSE is coming from a depth of 5 and a child weight of 15(for without round)
+```
+## Visualizing Child Weight and Depth
+```{r}
+combine_res_db = cbind.data.frame(cv_params_combine, rmse_vec_combine)
+
+names(combine_res_db)[3] = c("RMSE")
+#convert depth to a factor
+combine_res_db$max_depth = as.factor(combine_res_db$max_depth)
+#convert child weight to factor
+combine_res_db$min_child_weight = as.factor(combine_res_db$min_child_weight) 
+#Heatmap
+Child_Weight_Depth_RMSE = ggplot(combine_res_db, aes(y = max_depth, x = min_child_weight, fill = RMSE)) + 
+  geom_tile() + 
+  theme_bw() + 
+  scale_fill_gradient2(low = "blue", 
+    mid = "white", 
+    high = "red", 
+    midpoint = mean(combine_res_db$RMSE, na.rm = TRUE), 
+    space = "Lab", 
+    na.value ="grey", 
+    guide = "colourbar", 
+    aesthetics = "fill") + 
+  labs(x = "Minimum Child Weight", y = "Max Depth", fill = "RMSE") 
+
+Child_Weight_Depth_RMSE
+
+combine_res_db
+```
+## Tuning Gamma for Combine XGBoost Model
+
+```{r gamma tuning}
+combine_gamma_values = c(0, 0.05, 0.1, 0.15, 0.2, 0.25) 
+
+
+set.seed(303)
+rmse_vec_combine2 = rep(NA, length(combine_gamma_values)) 
+for(i in 1:length(combine_gamma_values)){
+  bst_tune_combine2 = xgb.cv(data = combine_dtrain, 
+              nfold = 5, 
+              eta = 0.1, 
+              max.depth = 3, 
+              min_child_weight = 1, 
+              gamma = combine_gamma_values[i], 
+              nrounds = 51, 
+              early_stopping_rounds = 20, 
+              verbose = 1, 
+              nthread = 1, 
+              print_every_n = 20, 
+              objective = "reg:squarederror",  
+              eval_metric = "rmse") 
+  rmse_vec_combine2[i] = bst_tune_combine2$evaluation_log$test_rmse_mean[bst_tune_combine2$best_iteration]
+  
+}
+
+cbind.data.frame(combine_gamma_values, rmse_vec_combine2)
+#.15 for Gamma is giving us our best RMSE (for without round)
+```
+## Tuning Subsample and Col Sample
+```{r tune xgb samples}
+
+
+combine_subsample = c(0.5, 0.6, 0.7, 0.8, 0.9, 1) 
+combine_colsample_by_tree = c(0.5, 0.6, 0.7, 0.8, 0.9, 1) 
+
+
+cv_params_combine2 = expand.grid(combine_subsample, combine_colsample_by_tree)
+
+names(cv_params_combine2) = c("subsample", "colsample_by_tree")
+
+rmse_vec_combine3 = rep(NA, nrow(cv_params_combine2)) 
+#Subsample and Col sample for loop
+for(i in 1:nrow(cv_params_combine2)){
+  set.seed(303)
+  bst_tune_combine3 = xgb.cv(data = combine_dtrain, 
+              nfold = 5, 
+              eta = 0.1, 
+              max.depth = 3, 
+              min_child_weight = 1, 
+              gamma = .2, 
+              subsample = cv_params_combine2$subsample[i], 
+              colsample_bytree = cv_params_combine2$colsample_by_tree[i], 
+              nrounds = 51, 
+              early_stopping_rounds = 20, 
+              verbose = 1, 
+              nthread = 1, 
+              print_every_n = 20, 
+              objective = "reg:squarederror", 
+              eval_metric = "rmse")
+  rmse_vec_combine3[i] = bst_tune_combine3$evaluation_log$test_rmse_mean[bst_tune_combine3$best_iteration]
+  
+}
+
+```
+## Visualizing Subsample and Col Sample Tuning
+```{r}
+combine_res_db2 = cbind.data.frame(cv_params_combine2, rmse_vec_combine3)
+
+names(combine_res_db2)[3] = c("rmse") 
+
+combine_res_db2$subsample = as.factor(combine_res_db2$subsample) 
+
+combine_res_db2$colsample_by_tree = as.factor(combine_res_db2$colsample_by_tree) 
+
+Combine_Subsample_ColSample = ggplot(combine_res_db2, aes(y = colsample_by_tree, x = subsample, fill = rmse)) + 
+  geom_tile() + 
+  theme_bw() + 
+  scale_fill_gradient2(low = "blue", 
+    mid = "white", 
+    high = "red", 
+    midpoint =mean(combine_res_db2$rmse, na.rm = TRUE), 
+    space = "Lab", 
+    na.value ="grey", 
+    guide = "colourbar", 
+    aesthetics = "fill") + 
+  labs(x = "Subsample", y = "Column Sample by Tree", fill = "rmse") 
+
+Combine_Subsample_ColSample
+#best combination is a subsample of 1 and a col sample of 1 for with round and .9 sub sample and .7 colsample without round
+```
+## ETA Tuning
+```{r}
+# Use xgb.cv to run cross-validation inside xgboost
+set.seed(303)
+bst_mod_combine_1 = xgb.cv(data = combine_dtrain, 
+              nfold = 5, 
+              eta = 0.3, 
+              max.depth = 3, 
+              min_child_weight = 1, 
+              gamma = 0.2, 
+              subsample = 1, 
+              colsample_bytree =  1, 
+              nrounds = 51, 
+              early_stopping_rounds = 20, 
+              verbose = 1, 
+              nthread = 1, 
+              print_every_n = 20, 
+              objective = "reg:squarederror", 
+              eval_metric = "rmse")
+
+bst_mod_combine_2 = xgb.cv(data = combine_dtrain, 
+              nfold = 5, 
+              eta = 0.1, 
+              max.depth = 3, 
+              min_child_weight = 1, 
+              gamma = .2, 
+              subsample = 1, 
+              colsample_bytree =  1, 
+              nrounds = 51, 
+              early_stopping_rounds = 20, 
+              verbose = 1, 
+              nthread = 1, 
+              print_every_n = 20, 
+              objective = "reg:squarederror", 
+              eval_metric = "rmse")
+
+bst_mod_combine_3 = xgb.cv(data = combine_dtrain, 
+              nfold = 5, 
+              eta = 0.05, 
+              max.depth = 3, 
+              min_child_weight = 1, 
+              gamma = .2, 
+              subsample = 1, 
+              colsample_bytree =  1, 
+              nrounds = 51, 
+              early_stopping_rounds = 20, 
+              verbose = 1, 
+              nthread = 1, 
+              print_every_n = 20, 
+              objective = "reg:squarederror", 
+              eval_metric = "rmse")
+
+bst_mod_combine_4 = xgb.cv(data = combine_dtrain, 
+              nfold = 5, 
+              eta = 0.01, 
+              max.depth = 3, 
+              min_child_weight = 1, 
+              gamma = .2, 
+              subsample = 1, 
+              colsample_bytree =  1, 
+              nrounds = 51, 
+              early_stopping_rounds = 20, 
+              verbose = 1, 
+              nthread = 1, 
+              print_every_n = 20, 
+              objective = "reg:squarederror", 
+              eval_metric = "rmse")
+
+bst_mod_combine_5 = xgb.cv(data = combine_dtrain, 
+              nfold = 5, 
+              eta = 0.005, 
+              max.depth = 3, 
+              min_child_weight = 1, 
+              gamma = .2, 
+              subsample = 1, 
+              colsample_bytree =  1, 
+              nrounds = 51, 
+              early_stopping_rounds = 20, 
+              verbose = 1, 
+              nthread = 1, 
+              print_every_n = 20, 
+              objective = "reg:squarederror", 
+              eval_metric = "rmse")
+```
+## Plotting ETA TEsting
+```{r eta plots}
+
+# Extract results for model with eta = 0.3
+pd1 = cbind.data.frame(bst_mod_combine_1$evaluation_log[,c("iter", "test_rmse_mean")], rep(0.3, nrow(bst_mod_combine_1$evaluation_log)))
+names(pd1)[3] = "eta"
+# Extract results for model with eta = 0.1
+pd2 = cbind.data.frame(bst_mod_combine_2$evaluation_log[,c("iter", "test_rmse_mean")], rep(0.1, nrow(bst_mod_combine_2$evaluation_log)))
+names(pd2)[3] = "eta"
+# Extract results for model with eta = 0.05
+pd3 = cbind.data.frame(bst_mod_combine_3$evaluation_log[,c("iter", "test_rmse_mean")], rep(0.05, nrow(bst_mod_combine_3$evaluation_log)))
+names(pd3)[3] = "eta"
+# Extract results for model with eta = 0.01
+pd4 = cbind.data.frame(bst_mod_combine_4$evaluation_log[,c("iter", "test_rmse_mean")], rep(0.01, nrow(bst_mod_combine_4$evaluation_log)))
+names(pd4)[3] = "eta"
+# Extract results for model with eta = 0.005
+pd5 = cbind.data.frame(bst_mod_combine_5$evaluation_log[,c("iter", "test_rmse_mean")], rep(0.005, nrow(bst_mod_combine_5$evaluation_log)))
+names(pd5)[3] = "eta"
+# Join datasets
+eta_plot_data = rbind.data.frame(pd1, pd2, pd3, pd4, pd5)
+# Convert ETA to factor
+eta_plot_data$eta = as.factor(eta_plot_data$eta)
+# Plot ETA
+g_6 <- ggplot(eta_plot_data, aes(x = iter, y = test_rmse_mean, color = eta))+
+  geom_point(alpha = 0.5) +
+  theme_bw() + 
+  theme(panel.grid.major = element_blank(), 
+        panel.grid.minor = element_blank(), 
+        panel.border = element_blank(), 
+        panel.background = element_blank()) + 
+  labs(x = "Number of Trees", title = "RMSE v Number of Trees",
+       y = "RMSE", color = "Learning \n Rate")  # Set labels
+g_6
+
+# Plot lines
+g_7 <- ggplot(eta_plot_data, aes(x = iter, y = test_rmse_mean, color = eta))+
+  geom_smooth(alpha = 0.5) +
+  theme_bw() + 
+  theme(panel.grid.major = element_blank(), 
+        panel.grid.minor = element_blank(), 
+        panel.border = element_blank(), 
+        panel.background = element_blank()) + 
+  labs(x = "Number of Trees", title = "RMSE vs Learning Rate",
+       y = "RMSE", color = "Learning \n Rate")  
+g_7
+
+```
+## Final XGBoost Model
+```{r}
+set.seed(303)
+bst_final_combine = xgboost(data = combine_dtrain, 
+              eta = 0.3, 
+              max.depth =  3,
+              min_child_weight = 1, 
+              gamma = .2, 
+              subsample =  1, 
+              colsample_bytree = 1, 
+              nrounds = 51, 
+              early_stopping_rounds = 20, 
+              verbose = 1, 
+              nthread = 1, 
+              print_every_n = 20, 
+              objective = "reg:squarederror", 
+              eval_metric = "rmse")
+##RMSE of 9.81 for with round and 59.98 without round
+```
+
+## Make Final Predictions with Best Model
+```{r}
+
+final_combine_boost_pred = predict(bst_final_combine, combine_dtest)
+
+#put together predicted values with actual pick values
+final_combine_pred_dat = data.frame(Predicted_Pick = final_combine_boost_pred,
+                                    Actual_Pick = combine_test_data$Pick)
+
+#make sure everything is the right data type
+str(final_combine_pred_dat)
+
+#Trying to round our picks to the nearest number which would equate to that exact NFL Draft Pick
+final_combine_pred_dat$Predicted_Pick = round(final_combine_pred_dat$Predicted_Pick)
+
+#What do the final values look like?
+head(final_combine_pred_dat, 20)
+
+##Potting our Predictions out
+final_predictions_plot = ggplot(final_combine_pred_dat, aes(x = Actual_Pick, y = Predicted_Pick)) + geom_point(color = "blue", alpha = 0.5) + 
+  geom_abline(slope = 1, intercept = 0, linetype = "dashed", color = "orange") + 
+  labs(title = "Best Model Predicted vs Actual Pick Values",
+       x = "Actual Pick",
+       y = "Predicted Pick") +
+  theme_minimal()
+
+final_predictions_plot
+```
+##  Net Pred
+```{r}
+##Taking predicted_Pick - Actual_Pick and squaring it to calculate RSS
+res_ss <- sum(final_combine_pred_dat$Predicted_Pick-combine_test_data$Pick)^2
+res_ss
+
+##Subtracting Predicted_Pick and Actual_Pick to get 'net_pred'
+net_pred <- sum(final_combine_pred_dat$Predicted_Pick - combine_test_data$Pick)
+net_pred
+
+```
+##  Random Forest Model
+```{r}
+## Performing random forest with combine data set
+##This is the RF using Round (The one not using round produced at Net pred of 3000)
+train_data2 <- na.omit(combine_train_data)
+test_data2 <- na.omit(combine_test_data)
+rf_data_train <- train_data2 %>%
+  select(-Pos, -Drafted)
+rf_data_test <- test_data2 %>%
+  select(-Pos, -Drafted)
+
+##Building the random forest model
+rf_mod <- randomForest(Pick ~.-Pick, 
+                         data = rf_data_train, 
+                         ntree = 50, 
+                         nodesize = 1,
+                         mtry = 9) 
+
+##Create predictions for random forest model
+rf_preds <- predict(rf_mod, rf_data_test, type = "response")
+
+
+##Evaluate performance  
+combine_rmse2 = sqrt(mean((rf_preds - rf_data_test$Pick)^2)) 
+combine_rmse2 
+
+#put together predicted values with actual pick values 
+final_combine_pred_dat2 <- data.frame(Predicted_Pick2 = rf_preds, 
+                                    Actual_Pick2 = rf_data_test$Pick)
+
+##Subtracting Predicted_Pick and Actual_Pick to get 'net_pred'
+net_pred2 <- sum(final_combine_pred_dat2$Predicted_Pick - combine_test_data$Pick)
+net_pred2
+```
+
+
+
+
+
+
+
+
+
+
+
